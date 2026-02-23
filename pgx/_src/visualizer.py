@@ -632,6 +632,15 @@ class Visualizer:
                 )
             else:
                 self.config["COLOR_SET"] = ColorSet("white", "black", "lightgray", "white", "white", "black")
+        
+        elif _state.env_id == "yahtzee":
+            from pgx._src.dwg.yahtzee import _make_yahtzee_dwg
+
+            self.config["GRID_SIZE"] = 60
+            self.config["BOARD_WIDTH"] = 14
+            self.config["BOARD_HEIGHT"] = 18
+
+            self._make_dwg_group = _make_yahtzee_dwg
         else:
             assert False
 
