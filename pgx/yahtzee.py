@@ -229,6 +229,7 @@ def _make_observation(state: State, player_id: Array) -> Array:
     # is_my_turn
     is_my_turn = (state.current_player == player_id).astype(jnp.float32)
 
+    # todo add score card as well
     return jnp.concatenate([
         dice_normalized,                            # 5
         categories_used,                            # 13
