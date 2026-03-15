@@ -1,5 +1,3 @@
-# todo 
-
 import jax
 import jax.numpy as jnp
 
@@ -12,6 +10,10 @@ NUM_CATEGORIES = 13
 MAX_ROLLS = 2 # this only counts the rerolls therefore its only two. total rolls are 3
 NUM_DICE = 5
 
+FALSE = jnp.bool_(False)
+TRUE = jnp.bool_(True)
+ZERO = jnp.int32(0)
+
 # Category indices
 ONES, TWOS, THREES, FOURS, FIVES, SIXES = 0, 1, 2, 3, 4, 5
 THREE_OF_A_KIND, FOUR_OF_A_KIND, FULL_HOUSE = 6, 7, 8
@@ -19,20 +21,19 @@ SMALL_STRAIGHT, LARGE_STRAIGHT, YAHTZEE, CHANCE = 9, 10, 11, 12
 
 @dataclass
 class State(core.State):
-    current_player: Array = jnp.int32(0)
-    observation: Array = jnp.zeros((NUM_DICE + NUM_CATEGORIES + 2,), dtype=jnp.float32)
-    rewards: Array = jnp.zeros(2, dtype=jnp.float32)
-    terminated: Array = jnp.bool_(False)
-    truncated: Array = jnp.bool_(False)
+    current_player: Array = ZERO
+    observation: Array = jnp.zeros(46, dtype=jnp.float32)
+    rewards: Array = jnp.float32([0.0])
+    terminated: Array = FALSE
+    truncated: Array = FALSE
     legal_action_mask: Array = jnp.ones(32 + NUM_CATEGORIES, dtype=jnp.bool_)
     _step_count: Array = jnp.int32(0)
 
     _dice: Array = jnp.zeros(NUM_DICE, dtype=jnp.int32)
     _rolls_left: Array = jnp.int32(MAX_ROLLS)
     _turn_phase: Array = jnp.int32(0)
-    _categories_used: Array = jnp.zeros((2, NUM_CATEGORIES), dtype=jnp.bool_)
-    _scores: Array = jnp.zeros((2, NUM_CATEGORIES), dtype=jnp.int32)
-    _num_players: Array = jnp.int32(2)
+    _categories_used: Array = jnp.zeros(NUM_CATEGORIES, dtype=jnp.bool_)
+    _scores: Array = jnp.zeros(NUM_CATEGORIES, dtype=jnp.int32)
 
     @property
     def env_id(self) -> core.EnvId:
@@ -40,7 +41,7 @@ class State(core.State):
 
 class Yahtzee(core.Env):
     """
-    Kniffel (Yahtzee) environment for 1-4 players.
+    Kniffel (Yahtzee) environment for 1 player.
 
     Action space:
     - Actions 0-31: Roll dice (binary mask of which dice to keep)
@@ -51,12 +52,8 @@ class Yahtzee(core.Env):
         - 44 = chance
     """
 
-    def __init__(self, num_players: int = 2):
+    def __init__(self):
         super().__init__()
-
-        assert 1 <= num_players <= 4, "Yahtzee supports 1-4 players"
-
-        self._num_players = num_players
 
     def _init(self, key: PRNGKey) -> State:
         """
@@ -67,13 +64,12 @@ class Yahtzee(core.Env):
         dice = jax.random.randint(key, shape=(NUM_DICE,), minval=1, maxval=7)
 
         state = State(
-            current_player=jnp.int32(0),
+            current_player=ZERO,
             _dice = dice,
             _rolls_left = jnp.int32(2),
-            _turn_phase = jnp.int32(0),
-            _categories_used = jnp.zeros((self._num_players, NUM_CATEGORIES), dtype = jnp.bool_),
-            _scores = jnp.zeros((self._num_players, NUM_CATEGORIES), dtype=jnp.int32),
-            _num_players = jnp.int32(self._num_players),
+            _turn_phase = ZERO,
+            _categories_used = jnp.zeros(NUM_CATEGORIES, dtype = jnp.bool_),
+            _scores = jnp.zeros(NUM_CATEGORIES, dtype=jnp.int32),
         )
 
         state = state.replace(
@@ -107,7 +103,7 @@ class Yahtzee(core.Env):
             rewards = jax.lax.select(
                 all_categories_used,
                 _compute_final_scores(state),
-                jnp.zeros(self.num_players, dtype=jnp.float32),
+                jnp.array([0.0], dtype=jnp.float32),
             )
         )
 
@@ -130,16 +126,14 @@ class Yahtzee(core.Env):
     
     @property
     def num_players(self):
-        return self._num_players
+        return 1
     
 def _handle_reroll(state: State, action: Array, key: PRNGKey) -> State:
     """Reroll dice based on binary mask action"""
 
-    keep_mask = jnp.array([
-        (action >> i) & 1 for i in range(NUM_DICE)
-    ], dtype=jnp.bool_)
+    keep_mask = ((action >> jnp.arange(NUM_DICE)) & 1).astype(jnp.bool_)
 
-    new_dice = jax.random.randint(key, shape=(NUM_DICE, ), minval=1, maxval=7)
+    new_dice = jax.random.randint(key, shape=(NUM_DICE,), minval=1, maxval=7)
     dice = jnp.where(keep_mask, state._dice, new_dice)
 
     # Decrease rolls left
@@ -160,21 +154,17 @@ def _handle_reroll(state: State, action: Array, key: PRNGKey) -> State:
     
 def _handle_score(state: State, category: Array, key: PRNGKey) -> State:
     """Score current dice in chosen category"""
-    player = state.current_player
 
     # Calculate score for this category
     score = _calculate_score(state._dice, category)
 
-    scores = state._scores.at[player, category].set(score)
-    categories_used = state._categories_used.at[player, category].set(True)
+    scores = state._scores.at[category].set(score)
+    categories_used = state._categories_used.at[category].set(True)
 
-    # Move to next player
-    next_player = (player + 1) % state._num_players
 
     # reset the roll and increase turn?
 
     return state.replace(
-        current_player = next_player,
         _scores = scores,
         _categories_used = categories_used,
         _rolls_left = jnp.int32(MAX_ROLLS),
@@ -197,8 +187,7 @@ def _compute_legal_actions(state: State) -> Array:
 
     # Can score (actions 32-44) if in scoreing phase and category not used
     scoring_phase = ~has_rolls
-    player = state.current_player
-    available_categories = ~state._categories_used[player]
+    available_categories = ~state._categories_used
     legal = legal.at[32:32+NUM_CATEGORIES].set(scoring_phase & available_categories)
 
     return legal
@@ -216,25 +205,27 @@ def _make_observation(state: State, player_id: Array) -> Array:
     These are the minimal requirements to give the observaiton the markov property
     """
 
-    # Normalize dice to 0-1
-    dice_normalized = (state._dice - 1) / 5.0
+    
+    dice_zerobased = (state._dice - 1)
+    dice_matrix = jax.nn.one_hot(dice_zerobased, num_classes=6)
+    dice_one_hots = dice_matrix.flatten()
 
-    # Get player's used categories
-    categories_used = state._categories_used[player_id].astype(jnp.float32)
+    categories_used = state._categories_used.astype(jnp.float32)
 
+    rolls_one_hot = jax.nn.one_hot(state._rolls_left, num_classes=MAX_ROLLS)
 
-    # Rolls left
-    rolls_normalized = state._rolls_left / float(MAX_ROLLS)
-
-    # is_my_turn
-    is_my_turn = (state.current_player == player_id).astype(jnp.float32)
+    # the upper board score, which is important for the bonus will be 
+    # passed in as a normalized value from 0-1
+    upper_score = jnp.sum(state._scores[:6])
+    capped_score = jnp.minimum(upper_score, 63.0)
 
     # todo add score card as well
     return jnp.concatenate([
-        dice_normalized,                            # 5
+        dice_one_hots,                            # 30
         categories_used,                            # 13
-        jnp.array([rolls_normalized, is_my_turn])   # 2
-    ])                                              # 20
+        rolls_one_hot,                              # 2
+        jnp.array([capped_score / 63.0], dtype=jnp.float32),   # 1
+    ])                                              # 46
 
 def _calculate_score(dice: Array, categorty: Array) -> Array:
     """
@@ -337,7 +328,7 @@ def _compute_final_scores(state: State) -> Array:
     """
     Compute final scores with bonus
     """
-    totals = jnp.sum(state._scores, axis=1)
-    upper_sum = jnp.sum(state._scores[:, :6], axis=1)
+    totals = jnp.sum(state._scores, axis=-1)
+    upper_sum = jnp.sum(state._scores[:6], axis=-1)
     bonus = jnp.where(upper_sum >= 63, jnp.int32(35), jnp.int32(0))
-    return (totals + bonus).astype(jnp.float32)
+    return jnp.float32([totals + bonus])
