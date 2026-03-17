@@ -103,7 +103,7 @@ class Yahtzee(core.Env):
             rewards = jax.lax.select(
                 all_categories_used,
                 _compute_final_scores(state),
-                jnp.array([0.0], dtype=jnp.float32),
+                jnp.float32([0.0]),
             )
         )
 
@@ -214,18 +214,16 @@ def _make_observation(state: State, player_id: Array) -> Array:
 
     rolls_one_hot = jax.nn.one_hot(state._rolls_left, num_classes=MAX_ROLLS)
 
-    # the upper board score, which is important for the bonus will be 
-    # passed in as a normalized value from 0-1
-    upper_score = jnp.sum(state._scores[:6])
-    capped_score = jnp.minimum(upper_score, 63.0)
+    scores_normalized = state._scores / 50.0
+    
 
     # todo add score card as well
     return jnp.concatenate([
         dice_one_hots,                            # 30
         categories_used,                            # 13
         rolls_one_hot,                              # 2
-        jnp.array([capped_score / 63.0], dtype=jnp.float32),   # 1
-    ])                                              # 46
+        scores_normalized,                          # 13
+    ])                                              # 58
 
 def _calculate_score(dice: Array, categorty: Array) -> Array:
     """
