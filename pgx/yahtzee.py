@@ -211,19 +211,21 @@ def _make_observation(state: State, player_id: Array) -> Array:
     dice_one_hots = dice_matrix.flatten()
 
     categories_used = state._categories_used.astype(jnp.float32)
+    categories_available = 1 - categories_used
 
-    rolls_one_hot = jax.nn.one_hot(state._rolls_left, num_classes=MAX_ROLLS)
+    rolls_one_hot = jax.nn.one_hot(state._rolls_left, num_classes=MAX_ROLLS + 1)
 
-    scores_normalized = state._scores / 50.0
+    scores_max = jnp.array([5, 10, 15, 20, 25, 30, 30, 30, 25, 30, 40, 50, 30])
+    scores_normalized = jnp.true_divide(state._scores, scores_max)
     
 
     # todo add score card as well
     return jnp.concatenate([
         dice_one_hots,                            # 30
-        categories_used,                            # 13
-        rolls_one_hot,                              # 2
+        categories_available,                            # 13
+        rolls_one_hot,                              # 3
         scores_normalized,                          # 13
-    ])                                              # 58
+    ])                                              # 59
 
 def _calculate_score(dice: Array, categorty: Array) -> Array:
     """
